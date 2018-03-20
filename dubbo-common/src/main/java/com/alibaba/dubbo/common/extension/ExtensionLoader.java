@@ -60,33 +60,72 @@ public class ExtensionLoader<T> {
 
     private static final Logger logger = LoggerFactory.getLogger(ExtensionLoader.class);
 
+    /**
+     * 以下是dubbo读取扩展点的目录
+     */
     private static final String SERVICES_DIRECTORY = "META-INF/services/";
-
     private static final String DUBBO_DIRECTORY = "META-INF/dubbo/";
-
+    /**
+     * dubbo内部实现的各种扩展都放在了这个目录了
+     */
     private static final String DUBBO_INTERNAL_DIRECTORY = DUBBO_DIRECTORY + "internal/";
-
+    
+    
+    /**
+     * 名称分割符，实际上是逗号
+     */
     private static final Pattern NAME_SEPARATOR = Pattern.compile("\\s*[,]+\\s*");
 
-    private static final ConcurrentMap<Class<?>, ExtensionLoader<?>> EXTENSION_LOADERS = new ConcurrentHashMap<Class<?>, ExtensionLoader<?>>();
+    /**
+     * 每个定义的spi的接口都会构建一个扩展加载器(ExtensionLoader)实例，缓存在EXTENSION_LOADERS
+     * 一个接口对应一个ExtensionLoader
+     */
+    private static final ConcurrentMap<Class<?>/*SPI接口*/, ExtensionLoader<?>/*对应的ExtensionLoader对象*/> EXTENSION_LOADERS = new ConcurrentHashMap<Class<?>, ExtensionLoader<?>>();
 
-    private static final ConcurrentMap<Class<?>, Object> EXTENSION_INSTANCES = new ConcurrentHashMap<Class<?>, Object>();
+    /**
+     * 缓存所有SPI扩展类与其实例对应关系，以实现单例模式
+     */
+    private static final ConcurrentMap<Class<?>/*SPI扩展类*/, Object/*SPI扩展类对象*/> EXTENSION_INSTANCES = new ConcurrentHashMap<Class<?>, Object>();
 
-    // ==============================
+    // =====================================================================================================================
 
+    /**
+     * 要扩展的接口类型
+     */
     private final Class<?> type;
 
+    /**
+     * 创建自己的工厂，若type是ExtensionFactory.class则为空
+     */
     private final ExtensionFactory objectFactory;
 
-    private final ConcurrentMap<Class<?>, String> cachedNames = new ConcurrentHashMap<Class<?>, String>();
+    /**
+     * 缓存SPI接口扩展类和SPI扩展名称的正反对应关系
+     */
+    private final ConcurrentMap<Class<?>/*SPI接口扩展类*/, String/*SPI扩展名称*/> cachedNames = new ConcurrentHashMap<Class<?>, String>();
 
-    private final Holder<Map<String, Class<?>>> cachedClasses = new Holder<Map<String, Class<?>>>();
+    private final Holder<Map<String/*SPI扩展名称*/, Class<?>/*SPI接口扩展类*/>> cachedClasses = new Holder<Map<String, Class<?>>>();
 
-    private final Map<String, Activate> cachedActivates = new ConcurrentHashMap<String, Activate>();
-    private final ConcurrentMap<String, Holder<Object>> cachedInstances = new ConcurrentHashMap<String, Holder<Object>>();
+    private final Map<String/**/, Activate/**/> cachedActivates = new ConcurrentHashMap<String, Activate>();
+    /**
+     * 缓存实现类名和实现类对象的对应，便于单例化
+     */
+    private final ConcurrentMap<String/*实现类名称*/, Holder<Object>/*实现类对象*/> cachedInstances = new ConcurrentHashMap<String, Holder<Object>>();
+    /**
+     * 缓存打上注解@Adaptive的实现类的对象
+     */
     private final Holder<Object> cachedAdaptiveInstance = new Holder<Object>();
+    /**
+     * 缓存打上注解@Adaptive的实现类
+     */
     private volatile Class<?> cachedAdaptiveClass = null;
+    /**
+     * 缓存默认实现类的名称
+     */
     private String cachedDefaultName;
+    /**
+     * 缓存创建  打上注解@Adaptive的实现类的对象  失败的异常
+     */
     private volatile Throwable createAdaptiveInstanceError;
 
     private Set<Class<?>> cachedWrapperClasses;
@@ -98,10 +137,21 @@ public class ExtensionLoader<T> {
         objectFactory = (type == ExtensionFactory.class ? null : ExtensionLoader.getExtensionLoader(ExtensionFactory.class).getAdaptiveExtension());
     }
 
+    /**
+     * 判断是否带有@SPI注解
+     * 
+     * @param type
+     * @return
+     */
     private static <T> boolean withExtensionAnnotation(Class<T> type) {
         return type.isAnnotationPresent(SPI.class);
     }
 
+    /**
+     * 从EXTENSION_LOADERS 中查找ExtensionLoader，找不到则为接口创建ExtensionLoader
+     * @param type
+     * @return
+     */
     @SuppressWarnings("unchecked")
     public static <T> ExtensionLoader<T> getExtensionLoader(Class<T> type) {
         if (type == null)
@@ -126,11 +176,12 @@ public class ExtensionLoader<T> {
         return ExtensionLoader.class.getClassLoader();
     }
 
-    public String getExtensionName(T extensionInstance) {
-        return getExtensionName(extensionInstance.getClass());
-    }
 
-    public String getExtensionName(Class<?> extensionClass) {
+    public String getExtensionName(T extensionInstance) {
+	    return getExtensionName(extensionInstance.getClass());
+	}
+
+	public String getExtensionName(Class<?> extensionClass) {
         return cachedNames.get(extensionClass);
     }
 
@@ -431,6 +482,11 @@ public class ExtensionLoader<T> {
         }
     }
 
+    /**
+     * 获取打上注解@Adaptive的实现类的对象
+     * 
+     * @return
+     */
     @SuppressWarnings("unchecked")
     public T getAdaptiveExtension() {
         Object instance = cachedAdaptiveInstance.get();
@@ -481,6 +537,12 @@ public class ExtensionLoader<T> {
         return new IllegalStateException(buf.toString());
     }
 
+    /**
+     * 创建扩展对象
+     * 
+     * @param name 扩展名称
+     * @return
+     */
     @SuppressWarnings("unchecked")
     private T createExtension(String name) {
         Class<?> clazz = getExtensionClasses().get(name);
@@ -545,9 +607,14 @@ public class ExtensionLoader<T> {
         return clazz;
     }
 
+    /**
+     * 加载扩展名和扩展类对应关系
+     * 
+     * @return
+     */
     private Map<String, Class<?>> getExtensionClasses() {
         Map<String, Class<?>> classes = cachedClasses.get();
-        if (classes == null) {
+        if (classes == null) {//双重判空
             synchronized (cachedClasses) {
                 classes = cachedClasses.get();
                 if (classes == null) {
@@ -560,6 +627,10 @@ public class ExtensionLoader<T> {
     }
 
     // synchronized in getExtensionClasses
+    /**
+     * 加载扩展类，该方法在getExtensionClasses方法中synchronized代码块中调用
+     * @return
+     */
     private Map<String, Class<?>> loadExtensionClasses() {
         final SPI defaultAnnotation = type.getAnnotation(SPI.class);
         if (defaultAnnotation != null) {
@@ -702,6 +773,11 @@ public class ExtensionLoader<T> {
         return extension.value();
     }
 
+    /**
+     * 创建打上注解@Adaptive的实现类的对象
+     * 
+     * @return
+     */
     @SuppressWarnings("unchecked")
     private T createAdaptiveExtension() {
         try {
@@ -711,6 +787,11 @@ public class ExtensionLoader<T> {
         }
     }
 
+    /**
+     * 获取打上注解@Adaptive的实现类
+     * 
+     * @return
+     */
     private Class<?> getAdaptiveExtensionClass() {
         getExtensionClasses();
         if (cachedAdaptiveClass != null) {
@@ -719,6 +800,10 @@ public class ExtensionLoader<T> {
         return cachedAdaptiveClass = createAdaptiveExtensionClass();
     }
 
+    /**
+     * 创建打上注解@Adaptive的实现类
+     * @return
+     */
     private Class<?> createAdaptiveExtensionClass() {
         String code = createAdaptiveExtensionClassCode();
         ClassLoader classLoader = findClassLoader();
